@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NOVA — Ultra-Processed Food Scanner</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: "#0F172A",
+          paper: "#FAFAF9",
+          sage: {
+            50: "#F3F6F2",
+            200: "#D3DECB",
+            500: "#7C9070",
+            700: "#5A6B4F",
+          },
+          clinical: {
+            50: "#FDF2F2",
+            200: "#F0C4C4",
+            500: "#B23A3A",
+            700: "#8A2A2A",
+          },
+        },
+        fontFamily: {
+          sans: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
+        },
+      },
+    },
+  };
+</script>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+  body { background-color: #FAFAF9; color: #0F172A; }
+  .border-hair { border-width: 1px; border-color: #E2E2E0; }
+  #reader video { border-radius: 2px; }
+  #reader__dashboard_section_csr button {
+    border: 1px solid #0F172A !important;
+    color: #0F172A !important;
+    background: transparent !important;
+    padding: 6px 14px !important;
+    font-size: 13px !important;
+    border-radius: 2px !important;
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: #D6D3D1; }
+</style>
+</head>
+
+<body class="font-sans antialiased min-h-screen">
+
+  <!-- Top bar -->
+  <header class="border-b border-hair sticky top-0 bg-paper/95 backdrop-blur z-40">
+    <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-baseline gap-2">
+        <span class="text-lg font-semibold tracking-tight">NOVA</span>
+        <span class="text-xs text-ink/50 tracking-wide">Food Processing Scanner</span>
+      </div>
+      <nav class="flex items-center gap-6 text-sm text-ink/60">
+        <button id="nav-scan" class="text-ink font-medium border-b-2 border-ink pb-1">Scan</button>
+        <button id="nav-history" class="hover:text-ink transition-colors pb-1 border-b-2 border-transparent">History</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-10">
+
+    <!-- SCAN VIEW -->
+    <section id="view-scan">
+
+      <!-- Mode switch -->
+      <div class="flex border border-hair rounded-sm mb-8 w-fit">
+        <button id="mode-barcode" class="px-5 py-2 text-sm font-medium bg-ink text-paper transition-colors">Barcode</button>
+        <button id="mode-label" class="px-5 py-2 text-sm font-medium text-ink/60 transition-colors">Ingredient Label</button>
+      </div>
+
+      <!-- Barcode panel -->
+      <div id="panel-barcode">
+        <div class="border border-hair rounded-sm p-6 mb-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Camera Scan</h2>
+          <div id="reader" class="w-full max-w-md mx-auto"></div>
+          <div class="flex justify-center gap-3 mt-4">
+            <button id="btn-start-camera" class="border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+              Start Camera
+            </button>
+            <button id="btn-stop-camera" class="border border-hair px-5 py-2 text-sm font-medium text-ink/50 hidden rounded-sm">
+              Stop
+            </button>
+          </div>
+        </div>
+
+        <div class="border border-hair rounded-sm p-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Manual Entry</h2>
+          <form id="form-manual-barcode" class="flex gap-3">
+            <input
+              type="text"
+              id="input-barcode"
+              placeholder="Enter barcode digits, e.g. 3017620422003"
+              inputmode="numeric"
+              class="flex-1 border border-hair rounded-sm px-4 py-2 text-sm focus:outline-none focus:border-ink transition-colors bg-white"
+            />
+            <button type="submit" class="border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+              Look Up
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Label / OCR panel -->
+      <div id="panel-label" class="hidden">
+        <div class="border border-hair rounded-sm p-6 mb-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Photograph Ingredient List</h2>
+          <p class="text-sm text-ink/60 mb-4">
+            Use this when a product has no barcode match. Capture or upload a clear photo of the ingredients panel; text is extracted on-device.
+          </p>
+          <input type="file" id="input-photo" accept="image/*" capture="environment" class="block w-full text-sm text-ink/70 mb-4 file:mr-4 file:py-2 file:px-4 file:border file:border-ink file:rounded-sm file:text-sm file:font-medium file:bg-transparent file:text-ink hover:file:bg-ink hover:file:text-paper file:transition-colors" />
+          <div id="ocr-status" class="text-sm text-ink/50 hidden mb-2"></div>
+          <div class="w-full bg-hair/40 rounded-sm h-1 overflow-hidden mb-4 hidden" id="ocr-progress-track">
+            <div id="ocr-progress-bar" class="h-1 bg-ink transition-all" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="border border-hair rounded-sm p-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Extracted / Manual Ingredient Text</h2>
+          <textarea
+            id="input-ingredients-text"
+            rows="6"
+            placeholder="Extracted text will appear here. You can edit it before analyzing."
+            class="w-full border border-hair rounded-sm px-4 py-3 text-sm focus:outline-none focus:border-ink transition-colors bg-white resize-none"
+          ></textarea>
+          <button id="btn-analyze-text" class="mt-4 border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+            Analyze Ingredients
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading -->
+      <div id="loading-indicator" class="hidden mt-8 text-center text-sm text-ink/50">
+        Analyzing…
+      </div>
+
+      <!-- Error -->
+      <div id="error-box" class="hidden mt-8 border border-clinical-200 bg-clinical-50 rounded-sm p-5 text-sm text-clinical-700"></div>
+
+      <!-- Results -->
+      <div id="results" class="hidden mt-10"></div>
+
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section id="view-history" class="hidden">
+      <h2 class="text-sm font-medium text-ink/60 mb-6 tracking-wide uppercase">Recent Scans</h2>
+      <div id="history-list" class="space-y-3"></div>
+      <p id="history-empty" class="text-sm text-ink/40 hidden">No scans yet.</p>
+    </section>
+
+  </main>
+
+  <script>
+    // -------------------------------------------------------------------
+    // State & DOM references
+    // -------------------------------------------------------------------
+    const navScan = document.getElementById('nav-scan');
+    const navHistory = document.getElementById('nav-history');
+    const viewScan = document.getElementById('view-scan');
+    const viewHistory = document.getElementById('view-history');
+
+    const modeBarcodeBtn = document.getElementById('mode-barcode');
+    const modeLabelBtn = document.getElementById('mode-label');
+    const panelBarcode = document.getElementById('panel-barcode');
+    const panelLabel = document.getElementById('panel-label');
+
+    const btnStartCamera = document.getElementById('btn-start-camera');
+    const btnStopCamera = document.getElementById('btn-stop-camera');
+    const formManualBarcode = document.getElementById('form-manual-barcode');
+    const inputBarcode = document.getElementById('input-barcode');
+
+    const inputPhoto = document.getElementById('input-photo');
+    const ocrStatus = document.getElementById('ocr-status');
+    const ocrProgressTrack = document.getElementById('ocr-progress-track');
+    const ocrProgressBar = document.getElementById('ocr-progress-bar');
+    const inputIngredientsText = document.getElementById('input-ingredients-text');
+    const btnAnalyzeText = document.getElementById('btn-analyze-text');
+
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const errorBox = document.getElementById('error-box');
+    const resultsBox = document.getElementById('results');
+
+    const historyList = document.getElementById('history-list');
+    const historyEmpty = document.getElementById('history-empty');
+
+    let html5QrCode = null;
+    const HISTORY_KEY = 'nova_scan_history';
+    const MAX_HISTORY = 25;
+
+    // -------------------------------------------------------------------
+    // Navigation
+    // -------------------------------------------------------------------
+    function showScanView() {
+      viewScan.classList.remove('hidden');
+      viewHistory.classList.add('hidden');
+      navScan.classList.add('text-ink', 'font-medium', 'border-ink');
+      navScan.classList.remove('text-ink/60', 'border-transparent');
+      navHistory.classList.remove('text-ink', 'font-medium', 'border-ink');
+      navHistory.classList.add('text-ink/60', 'border-transparent');
+    }
+
+    function showHistoryView() {
+      viewHistory.classList.remove('hidden');
+      viewScan.classList.add('hidden');
+      navHistory.classList.add('text-ink', 'font-medium', 'border-ink');
+      navHistory.classList.remove('text-ink/60', 'border-transparent');
+      navScan.classList.remove('text-ink', 'font-medium', 'border-ink');
+      navScan.classList.add('text-ink/60', 'border-transparent');
+      renderHistory();
+    }
+
+    navScan.addEventListener('click', showScanView);
+    navHistory.addEventListener('click', showHistoryView);
+
+    modeBarcodeBtn.addEventListener('click', () => {
+      panelBarcode.classList.remove('hidden');
+      panelLabel.classList.add('hidden');
+      modeBarcodeBtn.classList.add('bg-ink', 'text-paper');
+      modeBarcodeBtn.classList.remove('text-ink/60');
+      modeLabelBtn.classList.remove('bg-ink', 'text-paper');
+      modeLabelBtn.classList.add('text-ink/60');
+      stopCamera();
+    });
+
+    modeLabelBtn.addEventListener('click', () => {
+      panelLabel.classList.remove('hidden');
+      panelBarcode.classList.add('hidden');
+      modeLabelBtn.classList.add('bg-ink', 'text-paper');
+      modeLabelBtn.classList.remove('text-ink/60');
+      modeBarcodeBtn.classList.remove('bg-ink', 'text-paper');
+      modeBarcodeBtn.classList.add('text-ink/60');
+      stopCamera();
+    });
+
+    // -------------------------------------------------------------------
+    // Camera barcode scanning (html5-qrcode)
+    // -------------------------------------------------------------------
+    btnStartCamera.addEventListener('click', startCamera);
+    btnStopCamera.addEventListener('click', stopCamera);
+
+    function startCamera() {
+      hideError();
+      html5QrCode = new Html5Qrcode("reader");
+      const config = {
+        fps: 10,
+        qrbox: { width: 260, height: 150 },
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+        ],
+      };
+
+      html5QrCode
+        .start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            inputBarcode.value = decodedText;
+            stopCamera();
+            lookupBarcode(decodedText);
+          },
+          () => { /* ignore per-frame scan failures */ }
+        )
+        .then(() => {
+          btnStartCamera.classList.add('hidden');
+          btnStopCamera.classList.remove('hidden');
+        })
+        .catch((err) => {
+          showError("Could not access camera: " + err + ". You can still use manual entry below.");
+        });
+    }
+
+    function stopCamera() {
+      if (html5QrCode) {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+          html5QrCode = null;
+        }).catch(() => {
+          html5QrCode = null;
+        });
+      }
+      btnStartCamera.classList.remove('hidden');
+      btnStopCamera.classList.add('hidden');
+    }
+
+    // -------------------------------------------------------------------
+    // Manual barcode entry
+    // -------------------------------------------------------------------
+    formManualBarcode.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const value = inputBarcode.value.trim();
+      if (!value) return;
+      lookupBarcode(value);
+    });
+
+    async function lookupBarcode(barcode) {
+      hideError();
+      hideResults();
+      showLoading();
+      try {
+        const res = await fetch(`/api/lookup/${encodeURIComponent(barcode)}`);
+        const data = await res.json();
+        hideLoading();
+        if (!res.ok || !data.found) {
+          showError(data.message || "Product not found.");
+          return;
+        }
+        renderResult(data);
+        saveToHistory(data);
+      } catch (err) {
+        hideLoading();
+        showError("Network error while contacting the server. Please try again.");
+      }
+    }
+
+    // -------------------------------------------------------------------
+    // OCR ingredient label flow (Tesseract.js, fully client-side)
+    // -------------------------------------------------------------------
+    inputPhoto.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      hideError();
+      ocrStatus.classList.remove('hidden');
+      ocrProgressTrack.classList.remove('hidden');
+      ocrStatus.textContent = "Reading image…";
+      ocrProgressBar.style.width = "0%";
+
+      try {
+        const result = await Tesseract.recognize(file, 'eng', {
+          logger: (m) => {
+            if (m.status === 'recognizing text') {
+              const pct = Math.round(m.progress * 100);
+              ocrProgressBar.style.width = pct + "%";
+              ocrStatus.textContent = "Extracting text… " + pct + "%";
+            } else {
+              ocrStatus.textContent = m.status;
+            }
+          },
+        });
+        inputIngredientsText.value = result.data.text.trim();
+        ocrStatus.textContent = "Text extracted. Review and edit before analyzing.";
+      } catch (err) {
+        ocrStatus.textContent = "Could not extract text from this image. Try typing it manually.";
+      } finally {
+        setTimeout(() => {
+          ocrProgressTrack.classList.add('hidden');
+        }, 800);
+      }
+    });
+
+    btnAnalyzeText.addEventListener('click', async () => {
+      const text = inputIngredientsText.value.trim();
+      if (!text) {
+        showError("Enter or extract ingredient text before analyzing.");
+        return;
+      }
+      hideError();
+      hideResults();
+      showLoading();
+      try {
+        const res = await fetch('/api/analyze-ingredients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ingredients_text: text }),
+        });
+        const data = await res.json();
+        hideLoading();
+        if (!res.ok) {
+          showError(data.message || "Could not analyze this text.");
+          return;
+        }
+        renderResult(data);
+        saveToHistory(data);
+      } catch (err) {
+        hideLoading();
+        showError("Network error while contacting the server. Please try again.");
+      }
+    });
+
+    // -------------------------------------------------------------------
+    // Rendering
+    // -------------------------------------------------------------------
+    function novaColorClasses(novaGroup) {
+      if (novaGroup === 1 || novaGroup === 2) {
+        return {
+          badge: "bg-sage-50 text-sage-700 border-sage-200",
+          bar: "bg-sage-500",
+        };
+      }
+      if (novaGroup === 3) {
+        return {
+          badge: "bg-ink/5 text-ink/70 border-hair",
+          bar: "bg-ink/40",
+        };
+      }
+      return {
+        badge: "bg-clinical-50 text-clinical-700 border-clinical-200",
+        bar: "bg-clinical-500",
+      };
+    }
+
+    function renderResult(data) {
+      const colors = novaColorClasses(data.nova_group);
+
+      let markersHtml = "";
+      if (data.flagged_markers && data.flagged_markers.length > 0) {
+        markersHtml = `
+          <div class="mt-6">
+            <h3 class="text-xs font-medium text-ink/50 uppercase tracking-wide mb-2">Flagged Markers</h3>
+            <div class="flex flex-wrap gap-2">
+              ${data.flagged_markers.map(m => `
+                <span class="text-xs border border-hair rounded-sm px-2 py-1 text-ink/70">${escapeHtml(m)}</span>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      let productHeaderHtml = "";
+      if (data.product_name) {
+        productHeaderHtml = `
+          <div class="flex items-start gap-4 mb-6">
+            ${data.image_url ? `<img src="${data.image_url}" alt="${escapeHtml(data.product_name)}" class="w-20 h-20 object-cover border border-hair rounded-sm" />` : ""}
+            <div>
+              <h2 class="text-lg font-semibold leading-tight">${escapeHtml(data.product_name)}</h2>
+              ${data.brand ? `<p class="text-sm text-ink/50 mt-1">${escapeHtml(data.brand)}</p>` : ""}
+              ${data.barcode ? `<p class="text-xs text-ink/30 mt-1">Barcode ${escapeHtml(data.barcode)}</p>` : ""}
+            </div>
+          </div>
+        `;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NOVA — Ultra-Processed Food Scanner</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: "#0F172A",
+          paper: "#FAFAF9",
+          sage: {
+            50: "#F3F6F2",
+            200: "#D3DECB",
+            500: "#7C9070",
+            700: "#5A6B4F",
+          },
+          clinical: {
+            50: "#FDF2F2",
+            200: "#F0C4C4",
+            500: "#B23A3A",
+            700: "#8A2A2A",
+          },
+        },
+        fontFamily: {
+          sans: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
+        },
+      },
+    },
+  };
+</script>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+  body { background-color: #FAFAF9; color: #0F172A; }
+  .border-hair { border-width: 1px; border-color: #E2E2E0; }
+  #reader video { border-radius: 2px; }
+  #reader__dashboard_section_csr button {
+    border: 1px solid #0F172A !important;
+    color: #0F172A !important;
+    background: transparent !important;
+    padding: 6px 14px !important;
+    font-size: 13px !important;
+    border-radius: 2px !important;
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: #D6D3D1; }
+</style>
+</head>
+
+<body class="font-sans antialiased min-h-screen">
+
+  <!-- Top bar -->
+  <header class="border-b border-hair sticky top-0 bg-paper/95 backdrop-blur z-40">
+    <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-baseline gap-2">
+        <span class="text-lg font-semibold tracking-tight">NOVA</span>
+        <span class="text-xs text-ink/50 tracking-wide">Food Processing Scanner</span>
+      </div>
+      <nav class="flex items-center gap-6 text-sm text-ink/60">
+        <button id="nav-scan" class="text-ink font-medium border-b-2 border-ink pb-1">Scan</button>
+        <button id="nav-history" class="hover:text-ink transition-colors pb-1 border-b-2 border-transparent">History</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-10">
+
+    <!-- SCAN VIEW -->
+    <section id="view-scan">
+
+      <!-- Mode switch -->
+      <div class="flex border border-hair rounded-sm mb-8 w-fit">
+        <button id="mode-barcode" class="px-5 py-2 text-sm font-medium bg-ink text-paper transition-colors">Barcode</button>
+        <button id="mode-label" class="px-5 py-2 text-sm font-medium text-ink/60 transition-colors">Ingredient Label</button>
+      </div>
+
+      <!-- Barcode panel -->
+      <div id="panel-barcode">
+        <div class="border border-hair rounded-sm p-6 mb-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Camera Scan</h2>
+          <div id="reader" class="w-full max-w-md mx-auto"></div>
+          <div class="flex justify-center gap-3 mt-4">
+            <button id="btn-start-camera" class="border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+              Start Camera
+            </button>
+            <button id="btn-stop-camera" class="border border-hair px-5 py-2 text-sm font-medium text-ink/50 hidden rounded-sm">
+              Stop
+            </button>
+          </div>
+        </div>
+
+        <div class="border border-hair rounded-sm p-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Manual Entry</h2>
+          <form id="form-manual-barcode" class="flex gap-3">
+            <input
+              type="text"
+              id="input-barcode"
+              placeholder="Enter barcode digits, e.g. 3017620422003"
+              inputmode="numeric"
+              class="flex-1 border border-hair rounded-sm px-4 py-2 text-sm focus:outline-none focus:border-ink transition-colors bg-white"
+            />
+            <button type="submit" class="border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+              Look Up
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Label / OCR panel -->
+      <div id="panel-label" class="hidden">
+        <div class="border border-hair rounded-sm p-6 mb-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Photograph Ingredient List</h2>
+          <p class="text-sm text-ink/60 mb-4">
+            Use this when a product has no barcode match. Capture or upload a clear photo of the ingredients panel; text is extracted on-device.
+          </p>
+          <input type="file" id="input-photo" accept="image/*" capture="environment" class="block w-full text-sm text-ink/70 mb-4 file:mr-4 file:py-2 file:px-4 file:border file:border-ink file:rounded-sm file:text-sm file:font-medium file:bg-transparent file:text-ink hover:file:bg-ink hover:file:text-paper file:transition-colors" />
+          <div id="ocr-status" class="text-sm text-ink/50 hidden mb-2"></div>
+          <div class="w-full bg-hair/40 rounded-sm h-1 overflow-hidden mb-4 hidden" id="ocr-progress-track">
+            <div id="ocr-progress-bar" class="h-1 bg-ink transition-all" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="border border-hair rounded-sm p-6">
+          <h2 class="text-sm font-medium text-ink/60 mb-4 tracking-wide uppercase">Extracted / Manual Ingredient Text</h2>
+          <textarea
+            id="input-ingredients-text"
+            rows="6"
+            placeholder="Extracted text will appear here. You can edit it before analyzing."
+            class="w-full border border-hair rounded-sm px-4 py-3 text-sm focus:outline-none focus:border-ink transition-colors bg-white resize-none"
+          ></textarea>
+          <button id="btn-analyze-text" class="mt-4 border border-ink px-5 py-2 text-sm font-medium hover:bg-ink hover:text-paper transition-colors rounded-sm">
+            Analyze Ingredients
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading -->
+      <div id="loading-indicator" class="hidden mt-8 text-center text-sm text-ink/50">
+        Analyzing…
+      </div>
+
+      <!-- Error -->
+      <div id="error-box" class="hidden mt-8 border border-clinical-200 bg-clinical-50 rounded-sm p-5 text-sm text-clinical-700"></div>
+
+      <!-- Results -->
+      <div id="results" class="hidden mt-10"></div>
+
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section id="view-history" class="hidden">
+      <h2 class="text-sm font-medium text-ink/60 mb-6 tracking-wide uppercase">Recent Scans</h2>
+      <div id="history-list" class="space-y-3"></div>
+      <p id="history-empty" class="text-sm text-ink/40 hidden">No scans yet.</p>
+    </section>
+
+  </main>
+
+  <script>
+    // -------------------------------------------------------------------
+    // State & DOM references
+    // -------------------------------------------------------------------
+    const navScan = document.getElementById('nav-scan');
+    const navHistory = document.getElementById('nav-history');
+    const viewScan = document.getElementById('view-scan');
+    const viewHistory = document.getElementById('view-history');
+
+    const modeBarcodeBtn = document.getElementById('mode-barcode');
+    const modeLabelBtn = document.getElementById('mode-label');
+    const panelBarcode = document.getElementById('panel-barcode');
+    const panelLabel = document.getElementById('panel-label');
+
+    const btnStartCamera = document.getElementById('btn-start-camera');
+    const btnStopCamera = document.getElementById('btn-stop-camera');
+    const formManualBarcode = document.getElementById('form-manual-barcode');
+    const inputBarcode = document.getElementById('input-barcode');
+
+    const inputPhoto = document.getElementById('input-photo');
+    const ocrStatus = document.getElementById('ocr-status');
+    const ocrProgressTrack = document.getElementById('ocr-progress-track');
+    const ocrProgressBar = document.getElementById('ocr-progress-bar');
+    const inputIngredientsText = document.getElementById('input-ingredients-text');
+    const btnAnalyzeText = document.getElementById('btn-analyze-text');
+
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const errorBox = document.getElementById('error-box');
+    const resultsBox = document.getElementById('results');
+
+    const historyList = document.getElementById('history-list');
+    const historyEmpty = document.getElementById('history-empty');
+
+    let html5QrCode = null;
+    const HISTORY_KEY = 'nova_scan_history';
+    const MAX_HISTORY = 25;
+
+    // -------------------------------------------------------------------
+    // Navigation
+    // -------------------------------------------------------------------
+    function showScanView() {
+      viewScan.classList.remove('hidden');
+      viewHistory.classList.add('hidden');
+      navScan.classList.add('text-ink', 'font-medium', 'border-ink');
+      navScan.classList.remove('text-ink/60', 'border-transparent');
+      navHistory.classList.remove('text-ink', 'font-medium', 'border-ink');
+      navHistory.classList.add('text-ink/60', 'border-transparent');
+    }
+
+    function showHistoryView() {
+      viewHistory.classList.remove('hidden');
+      viewScan.classList.add('hidden');
+      navHistory.classList.add('text-ink', 'font-medium', 'border-ink');
+      navHistory.classList.remove('text-ink/60', 'border-transparent');
+      navScan.classList.remove('text-ink', 'font-medium', 'border-ink');
+      navScan.classList.add('text-ink/60', 'border-transparent');
+      renderHistory();
+    }
+
+    navScan.addEventListener('click', showScanView);
+    navHistory.addEventListener('click', showHistoryView);
+
+    modeBarcodeBtn.addEventListener('click', () => {
+      panelBarcode.classList.remove('hidden');
+      panelLabel.classList.add('hidden');
+      modeBarcodeBtn.classList.add('bg-ink', 'text-paper');
+      modeBarcodeBtn.classList.remove('text-ink/60');
+      modeLabelBtn.classList.remove('bg-ink', 'text-paper');
+      modeLabelBtn.classList.add('text-ink/60');
+      stopCamera();
+    });
+
+    modeLabelBtn.addEventListener('click', () => {
+      panelLabel.classList.remove('hidden');
+      panelBarcode.classList.add('hidden');
+      modeLabelBtn.classList.add('bg-ink', 'text-paper');
+      modeLabelBtn.classList.remove('text-ink/60');
+      modeBarcodeBtn.classList.remove('bg-ink', 'text-paper');
+      modeBarcodeBtn.classList.add('text-ink/60');
+      stopCamera();
+    });
+
+    // -------------------------------------------------------------------
+    // Camera barcode scanning (html5-qrcode)
+    // -------------------------------------------------------------------
+    btnStartCamera.addEventListener('click', startCamera);
+    btnStopCamera.addEventListener('click', stopCamera);
+
+    function startCamera() {
+      hideError();
+      html5QrCode = new Html5Qrcode("reader");
+      const config = {
+        fps: 10,
+        qrbox: { width: 260, height: 150 },
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.CODE_128,
+        ],
+      };
+
+      html5QrCode
+        .start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            inputBarcode.value = decodedText;
+            stopCamera();
+            lookupBarcode(decodedText);
+          },
+          () => { /* ignore per-frame scan failures */ }
+        )
+        .then(() => {
+          btnStartCamera.classList.add('hidden');
+          btnStopCamera.classList.remove('hidden');
+        })
+        .catch((err) => {
+          showError("Could not access camera: " + err + ". You can still use manual entry below.");
+        });
+    }
+
+    function stopCamera() {
+      if (html5QrCode) {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+          html5QrCode = null;
+        }).catch(() => {
+          html5QrCode = null;
+        });
+      }
+      btnStartCamera.classList.remove('hidden');
+      btnStopCamera.classList.add('hidden');
+    }
+
+    // -------------------------------------------------------------------
+    // Manual barcode entry
+    // -------------------------------------------------------------------
+    formManualBarcode.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const value = inputBarcode.value.trim();
+      if (!value) return;
+      lookupBarcode(value);
+    });
+
+    async function lookupBarcode(barcode) {
+      hideError();
+      hideResults();
+      showLoading();
+      try {
+        const res = await fetch(`/api/lookup/${encodeURIComponent(barcode)}`);
+        const data = await res.json();
+        hideLoading();
+        if (!res.ok || !data.found) {
+          showError(data.message || "Product not found.");
+          return;
+        }
+        renderResult(data);
+        saveToHistory(data);
+      } catch (err) {
+        hideLoading();
+        showError("Network error while contacting the server. Please try again.");
+      }
+    }
+
+    // -------------------------------------------------------------------
+    // OCR ingredient label flow (Tesseract.js, fully client-side)
+    // -------------------------------------------------------------------
+    inputPhoto.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      hideError();
+      ocrStatus.classList.remove('hidden');
+      ocrProgressTrack.classList.remove('hidden');
+      ocrStatus.textContent = "Reading image…";
+      ocrProgressBar.style.width = "0%";
+
+      try {
+        const result = await Tesseract.recognize(file, 'eng', {
+          logger: (m) => {
+            if (m.status === 'recognizing text') {
+              const pct = Math.round(m.progress * 100);
+              ocrProgressBar.style.width = pct + "%";
+              ocrStatus.textContent = "Extracting text… " + pct + "%";
+            } else {
+              ocrStatus.textContent = m.status;
+            }
+          },
+        });
+        inputIngredientsText.value = result.data.text.trim();
+        ocrStatus.textContent = "Text extracted. Review and edit before analyzing.";
+      } catch (err) {
+        ocrStatus.textContent = "Could not extract text from this image. Try typing it manually.";
+      } finally {
+        setTimeout(() => {
+          ocrProgressTrack.classList.add('hidden');
+        }, 800);
+      }
+    });
+
+    btnAnalyzeText.addEventListener('click', async () => {
+      const text = inputIngredientsText.value.trim();
+      if (!text) {
+        showError("Enter or extract ingredient text before analyzing.");
+        return;
+      }
+      hideError();
+      hideResults();
+      showLoading();
+      try {
+        const res = await fetch('/api/analyze-ingredients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ingredients_text: text }),
+        });
+        const data = await res.json();
+        hideLoading();
+        if (!res.ok) {
+          showError(data.message || "Could not analyze this text.");
+          return;
+        }
+        renderResult(data);
+        saveToHistory(data);
+      } catch (err) {
+        hideLoading();
+        showError("Network error while contacting the server. Please try again.");
+      }
+    });
+
+    // -------------------------------------------------------------------
+    // Rendering
+    // -------------------------------------------------------------------
+    function novaColorClasses(novaGroup) {
+      if (novaGroup === 1 || novaGroup === 2) {
+        return {
+          badge: "bg-sage-50 text-sage-700 border-sage-200",
+          bar: "bg-sage-500",
+        };
+      }
+      if (novaGroup === 3) {
+        return {
+          badge: "bg-ink/5 text-ink/70 border-hair",
+          bar: "bg-ink/40",
+        };
+      }
+      return {
+        badge: "bg-clinical-50 text-clinical-700 border-clinical-200",
+        bar: "bg-clinical-500",
+      };
+    }
+
+    function renderResult(data) {
+      const colors = novaColorClasses(data.nova_group);
+
+      let markersHtml = "";
+      if (data.flagged_markers && data.flagged_markers.length > 0) {
+        markersHtml = `
+          <div class="mt-6">
+            <h3 class="text-xs font-medium text-ink/50 uppercase tracking-wide mb-2">Flagged Markers</h3>
+            <div class="flex flex-wrap gap-2">
+              ${data.flagged_markers.map(m => `
+                <span class="text-xs border border-hair rounded-sm px-2 py-1 text-ink/70">${escapeHtml(m)}</span>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      let productHeaderHtml = "";
+      if (data.product_name) {
+        productHeaderHtml = `
+          <div class="flex items-start gap-4 mb-6">
+            ${data.image_url ? `<img src="${data.image_url}" alt="${escapeHtml(data.product_name)}" class="w-20 h-20 object-cover border border-hair rounded-sm" />` : ""}
+            <div>
+              <h2 class="text-lg font-semibold leading-tight">${escapeHtml(data.product_name)}</h2>
+              ${data.brand ? `<p class="text-sm text-ink/50 mt-1">${escapeHtml(data.brand)}</p>` : ""}
+              ${data.barcode ? `<p class="text-xs text-ink/30 mt-1">Barcode ${escapeHtml(data.barcode)}</p>` : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      let nutriscoreHtml = "";
+      if (data.nutriscore) {
+        nutriscoreHtml = `
+          <div class="mt-6 text-sm text-ink/60">
+            Nutri-Score: <span class="font-semibold text-ink">${escapeHtml(data.nutriscore)}</span>
+          </div>
+        `;
+      }
+
+      resultsBox.innerHTML = `
+        <div class="border border-hair rounded-sm p-8">
+          ${productHeaderHtml}
+
+          <div class="flex items-center gap-4 mb-4">
+            <span class="inline-block text-xs font-semibold uppercase tracking-wide border ${colors.badge} rounded-sm px-3 py-1">
+              NOVA ${data.nova_group} — ${escapeHtml(data.nova_label)}
+            </span>
+            <span class="text-xs text-ink/40 uppercase tracking-wide">Confidence: ${escapeHtml(data.confidence || "n/a")}</span>
+          </div>
+
+          <div class="w-full h-1 bg-hair/40 rounded-sm overflow-hidden mb-4">
+            <div class="h-1 ${colors.bar}" style="width: ${(data.nova_group / 4) * 100}%"></div>
+          </div>
+
+          <p class="text-sm text-ink/70 leading-relaxed">${escapeHtml(data.nova_description)}</p>
+
+          ${markersHtml}
+          ${nutriscoreHtml}
+
+          ${data.ingredients_text ? `
+            <div class="mt-6 pt-6 border-t border-hair">
+              <h3 class="text-xs font-medium text-ink/50 uppercase tracking-wide mb-2">Ingredients</h3>
+              <p class="text-sm text-ink/60 leading-relaxed">${escapeHtml(data.ingredients_text)}</p>
+            </div>
+          ` : ""}
+        </div>
+      `;
+      resultsBox.classList.remove('hidden');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // -------------------------------------------------------------------
+    // UI helpers
+    // -------------------------------------------------------------------
+    function showLoading() { loadingIndicator.classList.remove('hidden'); }
+    function hideLoading() { loadingIndicator.classList.add('hidden'); }
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.classList.remove('hidden');
+    }
+    function hideError() { errorBox.classList.add('hidden'); }
+    function hideResults() { resultsBox.classList.add('hidden'); resultsBox.innerHTML = ""; }
+
+    // -------------------------------------------------------------------
+    // History (localStorage)
+    // -------------------------------------------------------------------
+    function saveToHistory(data) {
+      const entry = {
+        timestamp: new Date().toISOString(),
+        product_name: data.product_name || "Ingredient Scan",
+        brand: data.brand || null,
+        nova_group: data.nova_group,
+        nova_label: data.nova_label,
+        barcode: data.barcode || null,
+      };
+      let history = [];
+      try {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      } catch (e) {
+        history = [];
+      }
+      history.unshift(entry);
+      history = history.slice(0, MAX_HISTORY);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    }
+
+    function renderHistory() {
+      let history = [];
+      try {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      } catch (e) {
+        history = [];
+      }
+
+      if (history.length === 0) {
+        historyList.innerHTML = "";
+        historyEmpty.classList.remove('hidden');
+        return;
+      }
+      historyEmpty.classList.add('hidden');
+
+      historyList.innerHTML = history.map(entry => {
+        const colors = novaColorClasses(entry.nova_group);
+        const date = new Date(entry.timestamp);
+        const dateStr = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return `
+          <div class="border border-hair rounded-sm p-4 flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">${escapeHtml(entry.product_name)}</p>
+              <p class="text-xs text-ink/40 mt-1">${entry.brand ? escapeHtml(entry.brand) + " · " : ""}${dateStr}</p>
+            </div>
+            <span class="text-xs font-semibold uppercase tracking-wide border ${colors.badge} rounded-sm px-2 py-1 whitespace-nowrap">
+              NOVA ${entry.nova_group}
+            </span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Initial state
+    showScanView();
+  </script>
+
+</body>
+</html>Enter      }
+
+      let nutriscoreHtml = "";
+      if (data.nutriscore) {
+        nutriscoreHtml = `
+          <div class="mt-6 text-sm text-ink/60">
+            Nutri-Score: <span class="font-semibold text-ink">${escapeHtml(data.nutriscore)}</span>
+          </div>
+        `;
+      }
+
+      resultsBox.innerHTML = `
+        <div class="border border-hair rounded-sm p-8">
+          ${productHeaderHtml}
+
+          <div class="flex items-center gap-4 mb-4">
+            <span class="inline-block text-xs font-semibold uppercase tracking-wide border ${colors.badge} rounded-sm px-3 py-1">
+              NOVA ${data.nova_group} — ${escapeHtml(data.nova_label)}
+            </span>
+            <span class="text-xs text-ink/40 uppercase tracking-wide">Confidence: ${escapeHtml(data.confidence || "n/a")}</span>
+          </div>
+
+          <div class="w-full h-1 bg-hair/40 rounded-sm overflow-hidden mb-4">
+            <div class="h-1 ${colors.bar}" style="width: ${(data.nova_group / 4) * 100}%"></div>
+          </div>
+
+          <p class="text-sm text-ink/70 leading-relaxed">${escapeHtml(data.nova_description)}</p>
+
+          ${markersHtml}
+          ${nutriscoreHtml}
+
+          ${data.ingredients_text ? `
+            <div class="mt-6 pt-6 border-t border-hair">
+              <h3 class="text-xs font-medium text-ink/50 uppercase tracking-wide mb-2">Ingredients</h3>
+              <p class="text-sm text-ink/60 leading-relaxed">${escapeHtml(data.ingredients_text)}</p>
+            </div>
+          ` : ""}
+        </div>
+      `;
+      resultsBox.classList.remove('hidden');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // -------------------------------------------------------------------
+    // UI helpers
+    // -------------------------------------------------------------------
+    function showLoading() { loadingIndicator.classList.remove('hidden'); }
+    function hideLoading() { loadingIndicator.classList.add('hidden'); }
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.classList.remove('hidden');
+    }
+    function hideError() { errorBox.classList.add('hidden'); }
+    function hideResults() { resultsBox.classList.add('hidden'); resultsBox.innerHTML = ""; }
+
+    // -------------------------------------------------------------------
+    // History (localStorage)
+    // -------------------------------------------------------------------
+    function saveToHistory(data) {
+      const entry = {
+        timestamp: new Date().toISOString(),
+        product_name: data.product_name || "Ingredient Scan",
+        brand: data.brand || null,
+        nova_group: data.nova_group,
+        nova_label: data.nova_label,
+        barcode: data.barcode || null,
+      };
+      let history = [];
+      try {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      } catch (e) {
